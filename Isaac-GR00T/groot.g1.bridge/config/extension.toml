@@ -1,0 +1,7 @@
+[package]
+title = "GR00T G1 Bridge"
+description = "GR00T N1.7 Unitree G1 Bridge Extension"
+version = "0.1.0"
+
+[[python.module]]
+name = "groot.g1.bridge"
