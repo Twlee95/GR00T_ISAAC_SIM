@@ -1,15 +1,33 @@
 # GR00T N1.7 + SONIC G1 Isaac Sim Setup
 
-End-to-end pipeline for running GR00T N1.7 VLA with SONIC whole-body control on Unitree G1 in Isaac Sim.
+End-to-end setup for running Unitree G1 in Isaac Sim with SONIC whole-body control.
+
+Current verified status:
+
+```text
+Verified:
+Isaac Sim ↔ DDS Bridge ↔ SONIC g1_deploy ↔ LowCmd ↔ Isaac Sim
+
+Not yet verified:
+Full GR00T VLA → SONIC motion_token pipeline
+```
+
+---
 
 ## Requirements
 
 - Ubuntu 24.04
-- NVIDIA GPU (tested on RTX PRO 5000 Blackwell)
+- NVIDIA GPU
 - NVIDIA Driver >= 535
 - CUDA 12.x
-- Docker 29.x
+- Docker
 - NVIDIA Container Toolkit
+- Docker images:
+  - `taewonlee95/isaac-sim-n17:latest`
+  - `taewonlee95/sonic-build:g1-dds-working`
+  - `taewonlee95/gr00t-n17:latest`
+
+---
 
 ## 1. Install Docker
 
@@ -19,148 +37,243 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
+---
+
 ## 2. Install NVIDIA Container Toolkit
 
 ```bash
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
+  sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
 curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
   sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
   sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 
 sudo apt-get update
 sudo apt-get install -y nvidia-container-toolkit
+
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 ```
 
 Verify:
+
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
 ```
 
+---
+
 ## 3. Clone Repository
 
 ```bash
-git clone https://github.com/taewonlee95/Isaac-GR00T-N1.7.git
+mkdir -p /home/$USER/workspace
+cd /home/$USER/workspace
+
+git clone https://github.com/Twlee95/GR00T_ISAAC_SIM.git Isaac-GR00T-N1.7
 cd Isaac-GR00T-N1.7
 ```
 
-Repository structure:
-```
+Expected structure:
+
+```text
 Isaac-GR00T-N1.7/
 ├── Isaac-GR00T/
-│   ├── groot.g1.bridge/       ← Isaac Sim Extension (G1 bridge)
-│   └── ...                    ← GR00T N1.7 code
+│   ├── groot.g1.bridge/
+│   └── ...
 └── GR00T-WholeBodyControl/
-    ├── gear_sonic/            ← VLA inference code
-    ├── gear_sonic_deploy/     ← SONIC C++ deploy code
+    ├── gear_sonic/
+    ├── gear_sonic_deploy/
     └── ...
 ```
+
+Set workspace path:
+
+```bash
+export WORKSPACE=/home/$USER/workspace/Isaac-GR00T-N1.7
+```
+
+---
 
 ## 4. Pull Docker Images
 
 ```bash
-docker pull taewonlee95/sonic-build:g1-dds-working
 docker pull taewonlee95/isaac-sim-n17:latest
+docker pull taewonlee95/sonic-build:g1-dds-working
 docker pull taewonlee95/gr00t-n17:latest
 ```
 
 Image roles:
 
 | Image | Role |
-|-------|------|
-| `sonic-build:g1-dds-working` | SONIC C++ deploy + DDS bridge |
-| `isaac-sim-n17:latest` | Isaac Sim 5.1.0 + G1 bridge extension |
-| `gr00t-n17:latest` | GR00T N1.7 + VLA inference |
+|---|---|
+| `taewonlee95/isaac-sim-n17:latest` | Isaac Sim 5.1.0 + G1 bridge extension |
+| `taewonlee95/sonic-build:g1-dds-working` | SONIC deploy runtime + DDS bridge runtime |
+| `taewonlee95/gr00t-n17:latest` | GR00T / VLA runtime environment |
+
+---
 
 ## 5. Communication Structure
 
-```
+```text
 [isaac-sim container]
-  groot.g1.bridge Extension
-    ZMQ 5559 PUB → robot state
-    ZMQ 5558 SUB ← LowCmd
+  G1 Bridge Extension
+    ZMQ 5559 PUB → Isaac robot state
+    ZMQ 5558 SUB ← LowCmd from sonic
     ZMQ 5555 PUB → camera image
 
 [sonic container]
   dds_bridge.py
-    ZMQ 5559 SUB ← Isaac state
+    ZMQ 5559 SUB ← Isaac robot state
     DDS rt/lowstate PUB →
     DDS rt/lowcmd SUB ←
-    ZMQ 5558 PUB → LowCmd
+    ZMQ 5558 PUB → LowCmd to Isaac Sim
 
   g1_deploy_onnx_ref
     DDS rt/lowstate SUB ←
-    ZMQ 5556 SUB ← motion_token (from VLA)
+    SONIC policy / encoder / planner
     DDS rt/lowcmd PUB →
-    ZMQ 5567 PUB → g1_debug state
+    ZMQ 5567 PUB → g1_debug/state
 
 [gr00t container]
-  run_vla_inference.py
-    ZMQ 5555 SUB ← camera
-    ZMQ 5567 SUB ← g1_debug
-    ZMQ REQ 5550 ↔ GR00T PolicyServer
-    ZMQ 5556 PUB → motion_token + hand joints
+  Reserved for GR00T PolicyServer / VLA inference.
+  The container starts successfully, but full VLA is not verified yet.
 ```
 
-Overall flow:
-```
-Isaac Sim → state → dds_bridge → DDS → g1_deploy → LowCmd → dds_bridge → Isaac Sim
-Isaac Sim → camera → VLA → motion_token → g1_deploy → LowCmd
+Verified control loop:
+
+```text
+Isaac Sim
+→ ZMQ 5559 robot state
+→ dds_bridge.py
+→ DDS rt/lowstate
+→ g1_deploy_onnx_ref
+→ DDS rt/lowcmd
+→ dds_bridge.py
+→ ZMQ 5558 LowCmd
+→ Isaac Sim joint application
 ```
 
-## 6. Run
+---
 
-### Step 1: Start Containers
+## 6. Start Three Containers
+
+Remove old containers first:
 
 ```bash
-# SONIC container
-docker run -dit \
-  --name sonic \
-  --network host \
-  --gpus all \
-  taewonlee95/sonic-build:g1-dds-working \
-  tail -f /dev/null
+docker rm -f isaac-sim sonic gr00t 2>/dev/null || true
+```
 
-# GR00T container
-docker run -dit \
-  --name gr00t \
-  --network host \
-  --gpus all \
-  taewonlee95/gr00t-n17:latest \
-  tail -f /dev/null
+---
 
-# Isaac Sim container
-# Adjust workspace path to match your environment
-WORKSPACE=/home/$USER/workspace/Isaac-GR00T-N1.7
+### 6.1 Start Isaac Sim
 
-docker run -dit \
+```bash
+docker run -d \
   --name isaac-sim \
-  --network host \
   --gpus all \
+  --network host \
   -e ACCEPT_EULA=Y \
   -e PRIVACY_CONSENT=Y \
   -v $WORKSPACE/Isaac-GR00T/groot.g1.bridge:/isaac-sim/extsUser/groot.g1.bridge \
   -v $WORKSPACE/GR00T-WholeBodyControl:/workspace/gr00t/GR00T-WholeBodyControl \
+  --entrypoint bash \
   taewonlee95/isaac-sim-n17:latest \
-  bash -c "cd /isaac-sim && ./isaac-sim.streaming.sh"
+  -c "cd /isaac-sim && ./isaac-sim.streaming.sh"
 ```
 
-Verify:
+Check Isaac Sim:
+
+```bash
+docker logs isaac-sim 2>&1 | grep -E "G1 Bridge|Timeline|URDF|초기화|ego_view|step" | tail -80
+```
+
+Expected:
+
+```text
+[G1 Bridge] v5 시작!
+[G1 Bridge] Timeline play!
+[G1 Bridge] URDF 로드: /World/g1_29dof_with_hand
+[G1 Bridge] 바닥 추가!
+[G1 Bridge] 초기화 완료! DOF=43
+[G1 Bridge] G1 root pose / home joint 설정 완료!
+[G1 Bridge] ego_view 카메라 초기화 완료!
+```
+
+---
+
+### 6.2 Start SONIC
+
+Important: the SONIC container must mount both `gear_sonic_deploy` and `groot.g1.bridge`.
+
+```bash
+docker run -dit \
+  --name sonic \
+  --gpus all \
+  --network host \
+  -v $WORKSPACE/GR00T-WholeBodyControl/gear_sonic_deploy:/workspace \
+  -v $WORKSPACE/Isaac-GR00T/groot.g1.bridge:/bridge \
+  -e TensorRT_ROOT=/usr \
+  taewonlee95/sonic-build:g1-dds-working \
+  tail -f /dev/null
+```
+
+Check required files:
+
+```bash
+docker exec sonic ls /bridge/dds_bridge.py
+docker exec sonic ls /workspace/target/release/g1_deploy_onnx_ref
+```
+
+Expected:
+
+```text
+/bridge/dds_bridge.py
+/workspace/target/release/g1_deploy_onnx_ref
+```
+
+---
+
+### 6.3 Start GR00T container
+
+This starts the GR00T/VLA environment container.  
+The full VLA runtime is not verified yet because the required `UNITREE_G1_SONIC` finetuned checkpoint is missing.
+
+```bash
+docker run -dit \
+  --name gr00t \
+  --network host \
+  --gpus all \
+  -v $WORKSPACE/Isaac-GR00T:/workspace/gr00t \
+  -v $WORKSPACE/GR00T-WholeBodyControl:/workspace/GR00T-WholeBodyControl \
+  -e HF_HOME=/workspace/gr00t/checkpoints \
+  taewonlee95/gr00t-n17:latest \
+  tail -f /dev/null
+```
+
+Check containers:
+
 ```bash
 docker ps
 ```
 
 Expected:
-```
-sonic       Up
-gr00t       Up
-isaac-sim   Up
+
+```text
+isaac-sim
+sonic
+gr00t
 ```
 
-### Step 2: Start DDS Bridge
+---
+
+## 7. Start Verified SONIC Runtime
+
+### 7.1 Start DDS Bridge
 
 ```bash
+docker exec sonic bash -c "pkill -f '[d]ds_bridge.py' || true"
+
 docker exec -d sonic bash -c '
 LD_LIBRARY_PATH=/workspace/thirdparty/unitree_sdk2/thirdparty/lib:$LD_LIBRARY_PATH \
 CYCLONEDDS_URI="<CycloneDDS><Domain Id=\"any\"><General><Interfaces><NetworkInterface name=\"lo\" multicast=\"false\"/></Interfaces></General></Domain></CycloneDDS>" \
@@ -169,13 +282,15 @@ python3 /bridge/dds_bridge.py > /tmp/dds_bridge.log 2>&1
 '
 ```
 
-Verify:
+Check:
+
 ```bash
-sleep 3 && docker exec sonic tail -20 /tmp/dds_bridge.log
+docker exec sonic tail -40 /tmp/dds_bridge.log
 ```
 
 Expected:
-```
+
+```text
 [DDS Bridge v3] 시작!
 [DDS Bridge v3] Isaac state SUB: port 5559
 [DDS Bridge v3] LowCmd ZMQ PUB: port 5558
@@ -185,43 +300,13 @@ Expected:
 [DDS Bridge v3] 메인 루프 시작!
 ```
 
-### Step 3: Start GR00T PolicyServer
+---
+
+### 7.2 Start SONIC G1 Deploy
 
 ```bash
-docker exec -d gr00t bash -c '
-cd /workspace/gr00t && \
-uv run python gr00t/eval/run_gr00t_server.py \
-  --model-path nvidia/GR00T-N1.7-3B \
-  --embodiment-tag UNITREE_G1_SONIC \
-  --device cuda:0 \
-  --port 5550 > /tmp/gr00t_server.log 2>&1
-'
-```
+docker exec sonic pkill -f g1_deploy_onnx_ref || true
 
-Wait ~60 seconds for model to load, then verify:
-```bash
-docker exec gr00t tail -20 /tmp/gr00t_server.log
-```
-
-### Step 4: Start VLA Inference
-
-```bash
-docker exec -d gr00t bash -c '
-cd /workspace/GR00T-WholeBodyControl && \
-python gear_sonic/scripts/run_vla_inference.py \
-  --host localhost \
-  --port 5550 > /tmp/vla_inference.log 2>&1
-'
-```
-
-Verify:
-```bash
-docker exec gr00t tail -20 /tmp/vla_inference.log
-```
-
-### Step 5: Start G1 Deploy
-
-```bash
 docker exec -it sonic bash -c '
 cd /workspace
 CYCLONEDDS_URI="<CycloneDDS><Domain Id=\"any\"><General><Interfaces><NetworkInterface name=\"lo\" multicast=\"false\"/></Interfaces></General></Domain></CycloneDDS>" \
@@ -236,87 +321,333 @@ reference/example \
 '
 ```
 
-Expected:
-```
+Expected logs:
+
+```text
+[DEBUG] Program starting...
+[DEBUG] Arguments validated...
+[DEBUG] Creating G1Deploy object...
+[DEBUG] Before MotionSwitcherClient
+[DEBUG] MotionSwitcherClient created
+[DEBUG] MotionSwitcherClient timeout set
+[DEBUG] MotionSwitcherClient init done
+[DEBUG] Before CheckMode
+[DEBUG] After MotionSwitcherClient block
+✓ Motion data loaded successfully!
+✓ Policy model loaded successfully!
+✓ Encoder model loaded successfully!
+✓ TensorRT planner model loaded successfully!
 [DEBUG] G1Deploy object created successfully!
 Init Done
 [DEBUG] LowStateHandler called: 100
 ```
 
-## 7. Verify Full Pipeline
+Keep this terminal open.
+
+---
+
+## 8. Verify LowCmd Loop
+
+In another terminal:
 
 ```bash
-# Isaac Sim bridge status
-docker logs isaac-sim 2>&1 | grep -E "G1 Bridge|URDF|초기화|LowCmd" | tail -20
-
-# DDS bridge status
-docker exec sonic tail -10 /tmp/dds_bridge.log
-
-# SONIC processes
-docker exec sonic pgrep -af 'dds_bridge|g1_deploy'
-
-# GR00T server
-docker exec gr00t tail -10 /tmp/gr00t_server.log
-
-# VLA inference
-docker exec gr00t tail -10 /tmp/vla_inference.log
+docker logs isaac-sim 2>&1 | grep "LowCmd 적용" | tail -10
 ```
 
-## 8. Stop
+Expected:
+
+```text
+[G1 Bridge] LowCmd 적용: len(motor_cmds)=29, target[0:10]=[-0.312  0.     0.     0.669 -0.363  0.    -0.312  0.     0.     0.669]
+```
+
+This confirms:
+
+```text
+Isaac Sim state reaches SONIC.
+SONIC g1_deploy receives LowState.
+SONIC generates 29-DOF LowCmd.
+LowCmd returns to Isaac Sim.
+Isaac Sim applies the joint command.
+```
+
+Process check:
+
+```bash
+docker exec sonic pgrep -af 'dds_bridge|g1_deploy'
+```
+
+Expected:
+
+```text
+python3 /bridge/dds_bridge.py
+./target/release/g1_deploy_onnx_ref ...
+```
+
+---
+
+## 9. Current Behavior
+
+The current SONIC output can remain nearly constant:
+
+```text
+target[0:10]=[-0.312  0.     0.     0.669 -0.363  0.    -0.312  0.     0.     0.669]
+```
+
+This is expected in the current verified setup.
+
+Reason:
+
+```text
+g1_deploy starts with a reference motion loaded but paused at frame 0.
+The system verifies state → LowCmd connectivity, not dynamic motion playback.
+```
+
+Observed log:
+
+```text
+Started with motion: dance_in_da_party_001__A464 (paused at frame 0)
+```
+
+So:
+
+```text
+Verified:
+LowState input and LowCmd output loop.
+
+Not verified:
+Dynamic motion progression or VLA-driven motion_token control.
+```
+
+---
+
+## 10. VLA / GR00T Status
+
+The GR00T container starts, but full VLA is not yet verified.
+
+Attempted PolicyServer command:
+
+```bash
+uv run python gr00t/eval/run_gr00t_server.py \
+  --model-path nvidia/GR00T-N1.7-3B \
+  --embodiment-tag UNITREE_G1_SONIC
+```
+
+This fails because:
+
+```text
+nvidia/GR00T-N1.7-3B is the base model.
+UNITREE_G1_SONIC is a posttrain tag and requires a finetuned checkpoint.
+```
+
+Observed error:
+
+```text
+Hint: 'UNITREE_G1_SONIC' is a posttrain tag that requires a finetuned checkpoint, not the base model.
+```
+
+Current checkpoint search showed only:
+
+```text
+nvidia/GR00T-N1.7-3B base model
+nvidia/Cosmos-Reason2-2B
+motionbricks checkpoints
+SMPL-related pt/pth files
+```
+
+Missing:
+
+```text
+UNITREE_G1_SONIC finetuned GR00T checkpoint
+```
+
+To run the full VLA pipeline later, use:
+
+```bash
+uv run python gr00t/eval/run_gr00t_server.py \
+  --model-path /path/to/unitree_g1_sonic_finetuned_checkpoint \
+  --embodiment-tag UNITREE_G1_SONIC \
+  --device cuda:0 \
+  --port 5550
+```
+
+---
+
+## 11. Optional: VLA Inference Runner Environment
+
+The VLA inference runner is not the PolicyServer.  
+It is a client that reads camera/state and sends requests to the PolicyServer.
+
+Previous working environment pattern:
+
+```bash
+docker exec -it gr00t bash
+cd /workspace/GR00T-WholeBodyControl
+bash install_scripts/install_inference.sh
+source .venv_inference/bin/activate
+PYTHONPATH=/workspace/gr00t:$PYTHONPATH \
+python gear_sonic/scripts/run_vla_inference.py \
+  --host localhost \
+  --port 5550 \
+  --state-zmq-port 5567 \
+  --action-zmq-port 5556 \
+  --camera-port 5555
+```
+
+This requires the GR00T PolicyServer to be running on port `5550`.
+
+---
+
+## 12. Port Reference
+
+| Port | Direction | Content |
+|---|---|---|
+| 5550 | GR00T PolicyServer | VLA inference ↔ PolicyServer |
+| 5555 | Isaac Sim → VLA | Camera image |
+| 5556 | VLA → SONIC | motion_token + hand joints |
+| 5558 | SONIC → Isaac Sim | LowCmd |
+| 5559 | Isaac Sim → SONIC | Robot state |
+| 5567 | SONIC → VLA | g1_debug/state |
+
+---
+
+## 13. Key Modifications
+
+### 13.1 Isaac Sim G1 bridge
+
+The Isaac Sim extension:
+
+```text
+Isaac-GR00T/groot.g1.bridge
+```
+
+does the following:
+
+```text
+Loads G1 URDF.
+Publishes robot state through ZMQ 5559.
+Publishes camera through ZMQ 5555.
+Receives LowCmd through ZMQ 5558.
+Applies LowCmd to Isaac Sim G1 joints.
+```
+
+---
+
+### 13.2 G1 root pose initialization
+
+The G1 bridge explicitly initializes the robot root pose:
+
+```python
+self._robot.set_world_pose(
+    position=np.array([0.0, 0.0, 0.80], dtype=np.float32),
+    orientation=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+)
+```
+
+Reason:
+
+```text
+The G1 robot must spawn near the world origin and above the ground.
+```
+
+---
+
+### 13.3 Home joint initialization
+
+The bridge initializes the first body joints:
+
+```python
+home_joints = np.zeros(self._robot.num_dof, dtype=np.float32)
+
+if self._robot.num_dof >= 29:
+    home_joints[0] = -0.312
+    home_joints[1] = 0.0
+    home_joints[2] = 0.0
+
+self._robot.set_joint_positions(home_joints)
+```
+
+---
+
+### 13.4 LowCmd debug log
+
+The bridge prints LowCmd application:
+
+```python
+print(
+    f"[G1 Bridge] LowCmd 적용: "
+    f"len(motor_cmds)={len(motor_cmds)}, "
+    f"target[0:10]={np.round(target[:10], 3)}"
+)
+```
+
+This confirms whether all 29 body commands are received.
+
+---
+
+### 13.5 DDS loopback configuration
+
+Both `dds_bridge.py` and `g1_deploy_onnx_ref` use:
+
+```bash
+CYCLONEDDS_URI="<CycloneDDS><Domain Id=\"any\"><General><Interfaces><NetworkInterface name=\"lo\" multicast=\"false\"/></Interfaces></General></Domain></CycloneDDS>"
+```
+
+Reason:
+
+```text
+The simulated DDS participants communicate through loopback.
+Both Python DDS bridge and C++ SONIC deploy must use the same DDS interface.
+```
+
+---
+
+### 13.6 SONIC container volume mounts
+
+The SONIC container must mount:
+
+```text
+$WORKSPACE/GR00T-WholeBodyControl/gear_sonic_deploy → /workspace
+$WORKSPACE/Isaac-GR00T/groot.g1.bridge → /bridge
+```
+
+Reason:
+
+```text
+/bridge/dds_bridge.py is required for ZMQ ↔ DDS translation.
+/workspace/target/release/g1_deploy_onnx_ref is required for SONIC control.
+```
+
+---
+
+## 14. Stop
+
+Stop runtime processes:
 
 ```bash
 docker exec sonic bash -c "pkill -f '[d]ds_bridge.py' || true"
 docker exec sonic pkill -f g1_deploy_onnx_ref || true
-docker stop sonic gr00t isaac-sim
 ```
 
-## 9. Restart from Clean State
+Stop containers:
 
 ```bash
-docker rm -f sonic gr00t isaac-sim
-# Then repeat from Step 6
+docker stop isaac-sim sonic gr00t
 ```
 
-## Port Reference
+Remove containers:
 
-| Port | Direction | Content |
-|------|-----------|---------|
-| 5550 | REQ/REP | GR00T PolicyServer |
-| 5555 | PUB | Isaac Sim camera → VLA |
-| 5556 | PUB | VLA motion_token → SONIC |
-| 5558 | PUB | dds_bridge LowCmd → Isaac Sim |
-| 5559 | PUB | Isaac Sim state → dds_bridge |
-| 5567 | PUB | SONIC g1_debug state |
-
-## Key Modifications
-
-### 1. CycloneDDS loopback configuration
-Both `dds_bridge.py` and `g1_deploy_onnx_ref` use identical DDS config:
+```bash
+docker rm -f isaac-sim sonic gr00t
 ```
-CYCLONEDDS_URI="<CycloneDDS><Domain Id="any"><General><Interfaces>
-  <NetworkInterface name="lo" multicast="false"/>
-</Interfaces></General></Domain></CycloneDDS>"
+
+---
+
+## 15. Large File Policy
+
+Large model and engine files should not be committed to git:
+
+```text
+*.ckpt
+*.pt
+*.pth
 ```
-Required for loopback DDS communication between processes in the same container.
-
-### 2. Python cyclonedds built against SONIC libddsc.so
-`dds_bridge.py` uses cyclonedds Python bindings compiled against:
-```
-/workspace/thirdparty/unitree_sdk2/thirdparty/lib/x86_64/libddsc.so.0
-```
-This ensures Python and C++ share the same DDS library instance.
-
-### 3. dds_bridge.py
-Translates between Isaac Sim ZMQ and Unitree DDS:
-- Isaac Sim ZMQ 5559 → DDS `rt/lowstate`
-- DDS `rt/lowcmd` → ZMQ 5558 → Isaac Sim
-
-### 4. G1 bridge Extension (groot.g1.bridge)
-Isaac Sim Extension that:
-- Loads G1 URDF (29DOF body + 14DOF hands)
-- Publishes robot state via ZMQ 5559
-- Publishes camera via ZMQ 5555
-- Receives LowCmd via ZMQ 5558 and applies to G1 joints
-
-### 5. ZMQ output port conflict fix
-`g1_deploy_onnx_ref` uses `--zmq-out-port 5567` instead of default 5557 to avoid conflict with other processes.
