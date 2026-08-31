@@ -374,7 +374,7 @@ class ElasticBand:
         self.kp_ang = 1000
         self.kd_ang = 10
         self.point = np.array([0, 0, 1])
-        self.length = 0
+        self.length = -0.2
         self.enable = True
 
     def Advance(self, pose):

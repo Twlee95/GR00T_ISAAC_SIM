@@ -20,3 +20,19 @@ checkpoints/
 *.safetensors
 
 GR00T-WholeBodyControl/motionbricks/out/
+.venv*/
+*.bak
+*.bak[0-9]
+*.before_official_xr
+*.bak_*
+*.mp4
+*.png
+datasets/
+.venv*/
+*.bak
+*.bak[0-9]
+*.before_official_xr
+*.bak_*
+*.mp4
+*.png
+datasets/

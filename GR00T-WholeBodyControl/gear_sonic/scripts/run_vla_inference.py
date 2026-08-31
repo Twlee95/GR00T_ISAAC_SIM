@@ -277,6 +277,7 @@ def run_policy_inference_and_process(policy, observation, robot_model):
     """
     try:
         action, _info = policy.get_action(observation)
+        print("[VLA-OUT]", {k: tuple(np.asarray(v).shape) for k, v in action.items()}, flush=True)
 
         action.pop("task_progress", None)
         action.pop("action.task_progress", None)

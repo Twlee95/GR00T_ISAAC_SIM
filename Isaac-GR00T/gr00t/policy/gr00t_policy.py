@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Gr00t Policy implementation for inference.
+"""
+Gr00t Policy implementation for inference.
 
 This module provides the core policy classes for running Gr00t models:
 - Gr00tPolicy: Base policy class for model inference

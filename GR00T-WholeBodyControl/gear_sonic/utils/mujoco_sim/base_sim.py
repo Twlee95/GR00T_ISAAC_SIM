@@ -392,6 +392,15 @@ class DefaultEnv:
         if self.unitree_bridge.joystick:
             self.unitree_bridge.PublishWirelessController()
         if self.elastic_band:
+            # 시작 6초 후 밴드 자동 해제 (SONIC 제어 안정화 뒤 풀기)
+            if not hasattr(self, "_band_t0"):
+                import time as _t
+                self._band_t0 = _t.time()
+            if self.elastic_band.enable:
+                import time as _t2
+                if _t2.time() - self._band_t0 > 6.0:
+                    self.elastic_band.enable = False
+                    print("[band] auto-released after 6s")
             if self.elastic_band.enable and self.use_floating_root_link:
                 pose = np.concatenate(
                     [
@@ -478,6 +487,27 @@ class DefaultEnv:
         return {}
 
     def update_render_caches(self):
+        # --- 3인칭 녹화 (SONIC 원본 동작 직접 캡처) ---
+        if not hasattr(self, "_rec_frames"):
+            import imageio as _imageio
+            self._imageio = _imageio
+            self._rec_frames = []
+            self._rec_renderer = mujoco.Renderer(self.mj_model, height=480, width=640)
+            self._rec_cam = mujoco.MjvCamera()
+            self._rec_cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+            self._rec_cam.trackbodyid = self.mj_model.body("pelvis").id
+            self._rec_cam.azimuth = 120
+            self._rec_cam.elevation = -30
+            self._rec_cam.distance = 2.0
+            self._rec_cam.lookat[:] = [0, 0, 0.5]
+        # 안정 상태(높이 0.6m 이상)일 때만 녹화 — 넘어지는 초기 구간 제외
+        _stable = self.mj_data.qpos[2] > 0.6
+        if _stable and len(self._rec_frames) < 1200:
+            self._rec_renderer.update_scene(self.mj_data, camera=self._rec_cam)
+            self._rec_frames.append(self._rec_renderer.render())
+            if len(self._rec_frames) == 1200:
+                self._imageio.mimsave("/workspace/wbc/sonic_sim_direct.mp4", self._rec_frames, fps=30)
+                print("SAVED sonic_sim_direct.mp4 frames=1200")
         render_caches = {}
         for camera_name, camera_config in self.camera_configs.items():
             renderer = self.renderers[camera_name]
@@ -525,6 +555,11 @@ class DefaultEnv:
 
     def reset(self):
         mujoco.mj_resetData(self.mj_model, self.mj_data)
+        # 안정 서기 높이로 초기화 (바닥 파묻힘 방지)
+        if self.config.get("FREE_BASE", True) and len(self.mj_data.qpos) >= 7:
+            self.mj_data.qpos[2] = 0.793
+            self.mj_data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+            mujoco.mj_forward(self.mj_model, self.mj_data)
 
 
 class BaseSimulator:
