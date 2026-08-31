@@ -46,7 +46,7 @@ class DemoG1EnvCfg(LocomanipulationG1EnvCfg):
             prim_path="{ENV_REGEX_NS}/Object",
             init_state=RigidObjectCfg.InitialStateCfg(pos=[0.7, 1.76, 0.85], rot=[0, 0, 0, 1]),
             spawn=UsdFileCfg(
-                usd_path="/home/taewon/workspace/saved_usd/rock/namaqualand_boulder_05_4k.usdc",
+                usd_path="/root/workspace/saved_usd/rock/namaqualand_boulder_05_4k.usdc",
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(),
             ),
         )
@@ -55,7 +55,7 @@ class DemoG1EnvCfg(LocomanipulationG1EnvCfg):
             prim_path="{ENV_REGEX_NS}/Object2",
             init_state=RigidObjectCfg.InitialStateCfg(pos=[-0.7, 1.76, 0.85], rot=[1, 0, 0, 0]),
             spawn=UsdFileCfg(
-                usd_path="/home/taewon/workspace/saved_usd/chemlab/Part3/Part3_clean.usd",
+                usd_path="/root/workspace/saved_usd/chemlab/Part3/Part3_clean.usd",
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(),
             ),
         )
@@ -64,7 +64,7 @@ class DemoG1EnvCfg(LocomanipulationG1EnvCfg):
             prim_path="{ENV_REGEX_NS}/Object3",
             init_state=RigidObjectCfg.InitialStateCfg(pos=[-0.7, 1.76, 0.92], rot=[0, 0, 0, 1]),
             spawn=UsdFileCfg(
-                usd_path="/home/taewon/workspace/saved_usd/chemlab/Part3/Part3_lid.usd",
+                usd_path="/root/workspace/saved_usd/chemlab/Part3/Part3_lid.usd",
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(),
             ),
         )

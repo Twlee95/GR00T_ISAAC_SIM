@@ -277,7 +277,7 @@ class LocomanipulationG1SceneCfg(InteractiveSceneCfg):
         prim_path="/World/envs/env_.*/Kitchen",
         init_state=AssetBaseCfg.InitialStateCfg(pos=[-6.0, -4.0, 0.0], rot=[0.0, 0.0, 0.0, 1.0]),
         spawn=UsdFileCfg(
-            usd_path="/home/taewon/workspace/saved_usd/env1_fastphys.usd",
+            usd_path="/root/workspace/saved_usd/env1_fastphys.usd",
         ),
     )
     # Table
